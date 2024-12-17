@@ -30,3 +30,4 @@ from ProductRegisters.Cryptanalysis.cube_attacks import *
 from ProductRegisters.Cryptanalysis.utility import *
 ```
     
+[![Github All Releases](https://img.shields.io/github/downloads/gt-hwswcosec/ProductRegistersLibrary/total.svg)]()
