@@ -242,10 +242,10 @@ class CMPR(FeedbackFunction):
                 print(f"Profiling Time: {time.time()-start_time}\n")
 
             # combine function
-            block_fn = chaining_profile.remap_constants({
-                0: MonomialProfile.logical_zero(),
-                1: MonomialProfile.logical_one()
-            })
+            block_fn = chaining_profile.remap_constants([
+                (0, MonomialProfile.logical_zero()),
+                (1, MonomialProfile.logical_one())
+            ])
 
             start_time = time.time()
             if verbose:
@@ -390,10 +390,10 @@ class CMPR(FeedbackFunction):
                 print(f"Chaining Profile: {monomial_profile.dense_str()}")
                 print(f"Profiling Time: {time.time()-start_time}\n")
 
-            block_fn = monomial_profile.remap_constants({
-                0: RootExpression.logical_zero(),
-                1: RootExpression.logical_one()
-            })
+            block_fn = monomial_profile.remap_constants([
+                (0, RootExpression.logical_zero()),
+                (1, RootExpression.logical_one())
+            ])
 
             start_time = time.time()
 
@@ -584,34 +584,32 @@ class CMPR(FeedbackFunction):
 
     #writes a VHDL file (special formatting for CMPRs)
     #Credit: Anna Hemingway
-    # Further modified by Arman
-    def write_VHDL(self, filename, entity_label = "cmpr", architecture_label = "run"):
+    def write_VHDL(self, filename):
         with open(filename, "w") as f:
             f.write(f"""
 library ieee;
 use ieee.std_logic_1164.all;
 
-entity {entity_label} is
+entity fpr is
     port (
-    clk : in std_logic;
-    rst : in std_logic;
-    seed : in std_logic_vector( {self.size - 1} downto 0);
+    i_clk :in std_logic;
+    i_rst : in std_logic;
+    i_seed_data: in std_logic_vector( {self.size - 1} downto 0);
     output: out std_logic_vector({self.size - 1} downto 0)
     );
-end {entity_label};
+end entity fpr;
 
-architecture {architecture_label} of {entity_label} is
+architecture run of fpr is
 
     signal currstate, nextstate:std_logic_vector({self.size - 1} downto 0);
 
-
 begin
 
-    statereg: process(clk, rst)
+    statereg: process(i_clk, i_rst)
     begin
-        if (rst = '1') then
-            currstate <= seed;
-        elsif (clk = '1' and clk'event) then
+        if (i_rst = '1') then
+            currstate <= i_seed_data;
+        elsif (i_clk = '1' and i_clk'event) then
             currstate <= nextstate;
         end if;
     end process;\n""")
@@ -623,9 +621,105 @@ begin
                 else:
                     f.write(f"    nextstate({str(i)}) <= {self.component_feedback[i].generate_VHDL()} XOR \n" +
                             f"        {self.chaining_feedback[i].generate_VHDL()};\n")
-            f.write(f"""
+            f.write("""
     output <= currstate;
 
-end {architecture_label};
+end run;
 
 """)
+            
+    def write_VHDL(self, filename, include_mpr = True):
+        overrides = {}
+        vhdl_str = "\n    "
+        for i in range(self.size - 1, -1 , -1):
+            
+            # write the current function:
+            if self.has_chaining[i] and include_mpr:
+                chaining_lines = self.chaining_feedback[i].merge_redundant().generate_VHDL(
+                    output_name = f"next_state({i})",
+                    array_name = "curr_state",
+                    subfunction_prefix = f"fn_{i}",
+                    overrides = overrides
+                ) 
+
+                # add in all subfunction lines:
+                vhdl_str += ("\n    ".join(chaining_lines[:-1]) + "\n    ")
+
+                # add in the MPR feedback
+                vhdl_str += (self.component_feedback[i].merge_redundant().generate_VHDL(
+                    output_name = f"next_state({i})",
+                    array_name = "curr_state",
+                    subfunction_prefix = f"fn_{i}",
+                    overrides = overrides
+                )[0][:-1]) + " XOR "
+
+                # add in the chaining logic
+                vhdl_str += chaining_lines[-1][len(f"next_state({i}) <= "):] + "\n    "
+
+            elif self.has_chaining[i] and not include_mpr:
+                vhdl_str += ("\n    ".join(self.chaining_feedback[i].merge_redundant().generate_VHDL(
+                    output_name = f"next_state({i})",
+                    array_name = "curr_state",
+                    subfunction_prefix = f"fn_{i}",
+                    overrides = overrides
+                )) + "\n    ")
+                
+            elif not self.has_chaining[i] and include_mpr:
+                vhdl_str += (self.component_feedback[i].merge_redundant().generate_VHDL(
+                    output_name = f"next_state({i})",
+                    array_name = "curr_state",
+                    subfunction_prefix = f"fn_{i}",
+                    overrides = overrides
+                )[0] + "\n    ")
+
+            else:
+                vhdl_str += (f"next_state({i}) <= '0';\n    ")
+
+
+            # add in override strings:
+            for j, node in enumerate(self.fn_list[i].subfunctions()):
+                if node not in overrides:
+                    overrides[node] = f'fn_{i}_{j+1}'
+
+        subfunction_vars = list(overrides.values())
+        if subfunction_vars:
+            subfn_var_string = f"signal {", ".join(overrides.values())}: std_logic;\n"
+        else:
+            subfn_var_string = ""
+
+        vhdl_str = f"""
+library ieee;
+use ieee.std_logic_1164.all;
+
+entity fpr is
+    port (
+    i_clk :in std_logic;
+    i_rst : in std_logic;
+    i_seed_data: in std_logic_vector( {self.size - 1} downto 0);
+    output: out std_logic_vector({self.size - 1} downto 0)
+    );
+end entity fpr;
+
+architecture run of fpr is
+
+    signal curr_state, next_state:std_logic_vector({self.size - 1} downto 0);
+    {subfn_var_string}    
+begin
+
+    statereg: process(i_clk, i_rst)
+    begin
+        if (i_rst = '1') then
+            curr_state <= i_seed_data;
+        elsif (i_clk = '1' and i_clk'event) then
+            curr_state <= next_state;
+        end if;
+    end process;\n""" + vhdl_str
+
+        vhdl_str += """
+    output <= curr_state;
+
+end run;
+
+"""
+        with open(filename, "w") as f:
+            f.write(vhdl_str)

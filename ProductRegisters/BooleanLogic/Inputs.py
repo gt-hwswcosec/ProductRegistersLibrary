@@ -12,19 +12,19 @@ class CONST(BooleanFunction):
         return set()
 
 
-    def eval(self, array):
+    def _eval(self, array, cache):
         return self.value
-    def eval_ANF(self, array):
+    def _eval_ANF(self, array, cache):
         return self.value
 
 
     def generate_c(self):
         return f"{self.value}"
-    def generate_tex(self):
-        return f"{self.value}"
-    def generate_VHDL(self):
+    def _generate_VHDL(self, cache, array_name):
         return f" '{self.value}' "
-    def generate_python(self):
+    def _generate_python(self, cache, array_name):
+        return f"{self.value}"
+    def generate_tex(self):
         return f"{self.value}"
     def generate_JSON(self):
         return {
@@ -37,19 +37,22 @@ class CONST(BooleanFunction):
 
 
     # overwriting BooleanFunction
-    def pretty_lines(self,depth = 0):
-        return [f"CONST({self.value})"]
     def dense_str(self):
         return f"CONST({self.value})"
 
 
     # overwriting BooleanFunction
-    def remap_constants(self, const_map):
-        return CONST(const_map[self.value])
-    def remap_indices(self, index_map):
-        return CONST(self.value)
-    def shift_indices(self, shift_amount):
-        return CONST(self.value)
+    def _remap_constants(self, const_map):
+        items = const_map.items() if hasattr(const_map, "items") else const_map
+        for key, new_value in items:
+            if self.value == key:
+                self.value = new_value
+                break
+        
+    def _remap_indices(self, index_map):
+        pass
+    def _shift_indices(self, shift_amount):
+        pass
 
 
     # overwriting BooleanFunction
@@ -57,8 +60,11 @@ class CONST(BooleanFunction):
         return type(self)(self.value)
 
     # overwriting BooleanFunction
-    def compose(self, input_map):
-        return CONST(self.value)
+    def _compose(self, input_map, in_place = False):
+        if in_place:
+            return self
+        else:
+            return CONST(self.value)
 
 
     # overwriting BooleanFunction
@@ -102,19 +108,19 @@ class VAR(BooleanFunction):
         return set([self.index])
 
 
-    def eval(self, array):
+    def _eval(self, array, cache):
         return array[self.index]
-    def eval_ANF(self, array):
+    def _eval_ANF(self, array, cache):
         return array[self.index]
     
     def generate_c(self):
         return f"(*currstate)[{self.index}]"
+    def _generate_VHDL(self, cache, array_name):
+        return f"{array_name}({self.index})"
+    def _generate_python(self, cache, array_name):
+        return f"{array_name}[{self.index}]"
     def generate_tex(self):
         return f"c_{{{self.index}}}[t]"
-    def generate_VHDL(self):
-        return f"currstate({self.index})"
-    def generate_python(self):
-        return f"currstate[{self.index}]"
     def generate_JSON(self):
         return {
             'class': 'VAR',
@@ -132,22 +138,29 @@ class VAR(BooleanFunction):
     
 
     # overwriting BooleanFunction
-    def remap_constants(self, constant_map):
-        return VAR(self.index)
-    def remap_indices(self, index_map):
-        return VAR(index_map[self.index])
-    def shift_indices(self, shift_amount):
-        return VAR(self.index + shift_amount)
+    def _remap_constants(self, constant_map):
+        pass
+    def _remap_indices(self, index_map):
+        if self.index in index_map:
+            self.index = index_map[self.index]
+    def _shift_indices(self, shift_amount):
+        self.index = self.index + shift_amount
 
 
      # overwriting BooleanFunction
     def __copy__(self):
-        return type(self)(self.index)
+        return VAR(self.index)
 
 
     # overwriting BooleanFunction
-    def compose(self, input_map):
-        return input_map[self.index]
+    def _compose(self, input_map, in_place = False):
+        try:
+            return input_map[self.index]
+        except:
+            if in_place:
+                return self
+            else:
+                return VAR(self.index)
 
 
     # overwriting BooleanFunction

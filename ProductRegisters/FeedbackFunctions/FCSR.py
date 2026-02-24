@@ -101,4 +101,3 @@ class FCSR(FeedbackFunction):
             out_state[2*i+1] = bit
 
         return size, out_state
-
